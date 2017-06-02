@@ -393,7 +393,7 @@ def _get_discussion_default_topic_id(course):
             return entry['id']
 
 
-def _create_discussion_board_context(request, course_key, discussion_id=None, thread_id=None):
+def _create_discussion_board_context(request, course_key, thread=None):
     """
     Returns the template context for rendering the discussion board.
     """
@@ -403,10 +403,7 @@ def _create_discussion_board_context(request, course_key, discussion_id=None, th
     user = context['user']
     cc_user = cc.User.from_django_user(user)
     user_info = context['user_info']
-    if thread_id:
-        thread = _find_thread(request, course, discussion_id=discussion_id, thread_id=thread_id)
-        if not thread:
-            raise Http404
+    if thread:
 
         # Since we're in page render mode, and the discussions UI will request the thread list itself,
         # we need only return the thread information for this one.
@@ -418,7 +415,6 @@ def _create_discussion_board_context(request, course_key, discussion_id=None, th
                 thread["pinned"] = False
         thread_pages = 1
         root_url = reverse('forum_form_discussion', args=[unicode(course.id)])
-    else:
         threads, query_params = get_threads(request, course, user_info)   # This might process a search query
         thread_pages = query_params['num_pages']
         root_url = request.path
@@ -637,11 +633,17 @@ class DiscussionBoardFragmentView(EdxFragmentView):
         """
         course_key = CourseKey.from_string(course_id)
         try:
+            if thread_id:
+                thread = _find_thread(request, course, discussion_id=discussion_id, thread_id=thread_id)
+                if not thread:
+                    raise Http404
+                track_thread_viewed_event(request, course, thread)
+            else:
+                thread = None
             context = _create_discussion_board_context(
                 request,
                 course_key,
-                discussion_id=discussion_id,
-                thread_id=thread_id,
+                thread=thread,
             )
             html = render_to_string('discussion/discussion_board_fragment.html', context)
             inline_js = render_to_string('discussion/discussion_board_js.template', context)
