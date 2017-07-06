@@ -6,7 +6,7 @@ import mock
 
 from certificates import api as certs_api
 from certificates.config import waffle
-from certificates.models import CertificateGenerationConfiguration, CertificateWhitelist
+from certificates.models import CertificateGenerationConfiguration, CertificateWhitelist, GeneratedCertificate, CertificateStatuses
 from certificates.signals import _listen_for_course_pacing_changed
 from lms.djangoapps.grades.new.course_grade_factory import CourseGradeFactory
 from lms.djangoapps.grades.tests.utils import mock_get_score, mock_passing_grade
@@ -16,6 +16,8 @@ from student.tests.factories import CourseEnrollmentFactory, UserFactory
 from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase
 from xmodule.modulestore.tests.factories import CourseFactory
 
+
+from openedx.core.djangoapps.signals.signals import LEARNER_NOW_VERIFIED
 
 class SelfGeneratedCertsSignalTest(ModuleStoreTestCase):
     """
@@ -73,10 +75,7 @@ class WhitelistGeneratedCertificatesTest(ModuleStoreTestCase):
                     user=self.user,
                     course_id=self.course.id
                 )
-                mock_generate_certificate_apply_async.assert_not_called(
-                    student=self.user,
-                    course_key=self.course.id
-                )
+                mock_generate_certificate_apply_async.assert_not_called()
             with waffle.waffle().override(waffle.SELF_PACED_ONLY, active=True):
                 CertificateWhitelist.objects.create(
                     user=self.user,
@@ -101,10 +100,7 @@ class WhitelistGeneratedCertificatesTest(ModuleStoreTestCase):
                     user=self.user,
                     course_id=self.ip_course.id
                 )
-                mock_generate_certificate_apply_async.assert_not_called(
-                    student=self.user,
-                    course_key=self.ip_course.id
-                )
+                mock_generate_certificate_apply_async.assert_not_called()
             with waffle.waffle().override(waffle.INSTRUCTOR_PACED_ONLY, active=True):
                 CertificateWhitelist.objects.create(
                     user=self.user,
@@ -122,7 +118,9 @@ class PassingGradeCertsTest(ModuleStoreTestCase):
     """
     def setUp(self):
         super(PassingGradeCertsTest, self).setUp()
-        self.course = CourseFactory.create(self_paced=True)
+        self.course = CourseFactory.create(
+            self_paced=True,
+        )
         self.user = UserFactory.create()
         self.enrollment = CourseEnrollmentFactory(
             user=self.user,
@@ -131,6 +129,12 @@ class PassingGradeCertsTest(ModuleStoreTestCase):
             mode="verified",
         )
         self.ip_course = CourseFactory.create(self_paced=False)
+        self.ip_enrollment = CourseEnrollmentFactory(
+            user=self.user,
+            course_id=self.ip_course.id,
+            is_active=True,
+            mode="verified",
+        )
 
     def test_cert_generation_on_passing_self_paced(self):
         with mock.patch(
@@ -139,22 +143,13 @@ class PassingGradeCertsTest(ModuleStoreTestCase):
         ) as mock_generate_certificate_apply_async:
             with waffle.waffle().override(waffle.SELF_PACED_ONLY, active=True):
                 grade_factory = CourseGradeFactory()
-                with mock_get_score(0, 2):
+                # Not passing
+                grade_factory.update(self.user, self.course)
+                mock_generate_certificate_apply_async.assert_not_called()
+                # Certs fired after passing
+                with mock_passing_grade():
                     grade_factory.update(self.user, self.course)
-                    mock_generate_certificate_apply_async.assert_not_called(
-                        student=self.user,
-                        course_key=self.course.id
-                    )
-                with mock_get_score(1, 2):
-                    grade_factory.update(self.user, self.course)
-                    mock_generate_certificate_apply_async.assert_called(
-                        student=self.user,
-                        course_key=self.course.id
-                    )
-                # Certs are not re-fired after passing
-                with mock_get_score(2, 2):
-                    grade_factory.update(self.user, self.course)
-                    mock_generate_certificate_apply_async.assert_not_called(
+                    mock_generate_certificate_apply_async.assert_called_with(
                         student=self.user,
                         course_key=self.course.id
                     )
@@ -163,28 +158,36 @@ class PassingGradeCertsTest(ModuleStoreTestCase):
         with mock.patch(
             'lms.djangoapps.certificates.signals.generate_certificate.apply_async',
             return_value=None
-        ) as mock_generate_certificate_apply_async:
+        ) as mock_generate_certificate_apply_async2:
             with waffle.waffle().override(waffle.INSTRUCTOR_PACED_ONLY, active=True):
                 grade_factory = CourseGradeFactory()
-                with mock_get_score(0, 2):
+                # Not passing
+                grade_factory.update(self.user, self.ip_course)
+                mock_generate_certificate_apply_async2.assert_not_called()
+                # Certs fired after passing
+                with mock_passing_grade():
                     grade_factory.update(self.user, self.ip_course)
-                    mock_generate_certificate_apply_async.assert_not_called(
+                    mock_generate_certificate_apply_async2.assert_called_with(
                         student=self.user,
                         course_key=self.ip_course.id
                     )
-                with mock_get_score(1, 2):
-                    grade_factory.update(self.user, self.ip_course)
-                    mock_generate_certificate_apply_async.assert_called(
-                        student=self.user,
-                        course_key=self.ip_course.id
-                    )
-                # Certs are not re-fired after passing
-                with mock_get_score(2, 2):
-                    grade_factory.update(self.user, self.ip_course)
-                    mock_generate_certificate_apply_async.assert_not_called(
-                        student=self.user,
-                        course_key=self.ip_course.id
-                    )
+
+    def test_cert_already_generated(self):
+        with mock.patch(
+                'lms.djangoapps.certificates.signals.generate_certificate.apply_async',
+                return_value=None
+        ) as mock_generate_certificate_apply_async:
+            grade_factory = CourseGradeFactory()
+            # Create the certificate
+            GeneratedCertificate.eligible_certificates.create(
+                user=self.user,
+                course_id=self.course.id,
+                status=CertificateStatuses.downloadable
+            )
+            # Certs are not re-fired after passing
+            with mock_passing_grade():
+                grade_factory.update(self.user, self.course)
+                mock_generate_certificate_apply_async.assert_not_called()
 
 
 class LearnerTrackChangeCertsTest(ModuleStoreTestCase):
@@ -193,42 +196,87 @@ class LearnerTrackChangeCertsTest(ModuleStoreTestCase):
     """
     def setUp(self):
         super(LearnerTrackChangeCertsTest, self).setUp()
-        self.course = CourseFactory.create(self_paced=True)
+        # self.course = CourseFactory.create(self_paced=True)
         self.user = UserFactory.create()
-        self.enrollment = CourseEnrollmentFactory(
-            user=self.user,
-            course_id=self.course.id,
-            is_active=True,
-            mode="verified",
-        )
+        # self.enrollment = CourseEnrollmentFactory(
+        #     user=self.user,
+        #     course_id=self.course.id,
+        #     is_active=True,
+        #     mode='honor',
+        # )
         self.ip_course = CourseFactory.create(self_paced=False)
+        self.ip_enrollment = CourseEnrollmentFactory(
+            user=self.user,
+            course_id=self.ip_course.id,
+            is_active=True,
+            mode='honor'
+        )
+        # self.ip_course2 = CourseFactory.create(self_paced=False)
+        # self.ip_enrollment2 = CourseEnrollmentFactory(
+        #     user=self.user,
+        #     course_id=self.ip_course2.id,
+        #     is_active=True,
+        #     mode='honor',
+        # )
 
-    def test_cert_generation_on_photo_verification_self_paced(self):
-        with mock.patch(
-            'lms.djangoapps.certificates.signals.generate_certificate.apply_async',
-            return_value=None
-        ) as mock_generate_certificate_apply_async:
-            with waffle.waffle().override(waffle.SELF_PACED_ONLY, active=True):
-                with mock_passing_grade():
-                    attempt = SoftwareSecurePhotoVerification(user=self.user)
-                    attempt.status = "approved"
-                    attempt.save()
-                    mock_generate_certificate_apply_async.assert_called(
-                        student=self.user,
-                        course_key=self.ip_course.id
-                    )
 
-    def test_cert_generation_on_photo_verification_instructor_paced(self):
-        with mock.patch(
-            'lms.djangoapps.certificates.signals.generate_certificate.apply_async',
-            return_value=None
-        ) as mock_generate_certificate_apply_async:
-            with waffle.waffle().override(waffle.INSTRUCTOR_PACED_ONLY, active=True):
-                with mock_passing_grade():
-                    attempt = SoftwareSecurePhotoVerification(user=self.user)
-                    attempt.status = "approved"
-                    attempt.save()
-                    mock_generate_certificate_apply_async.assert_called(
-                        student=self.user,
-                        course_key=self.ip_course.id
-                    )
+    # def test_cert_generation_on_photo_verification_self_paced(self):
+    #     with mock.patch(
+    #         'lms.djangoapps.certificates.signals.generate_certificate.apply_async',
+    #         return_value=None
+    #     ) as mock_generate_certificate_apply_async:
+    #         with waffle.waffle().override(waffle.SELF_PACED_ONLY, active=True):
+    #             # with mock_passing_grade():
+    #                 # Test negative
+    #                 mock_generate_certificate_apply_async.assert_not_called(
+    #                     student=self.user,
+    #                     course_key=self.course.id
+    #                 )
+    #                 # Test positive
+    #                 attempt = SoftwareSecurePhotoVerification(user=self.user)
+    #                 attempt.status = "approved"
+    #                 attempt.save()
+    #                 mock_generate_certificate_apply_async.assert_called(
+    #                     student=self.user,
+    #                     course_key=self.course.id
+    #                 )
+    #
+    # def test_cert_generation_on_photo_verification_instructor_paced(self):
+    #     with mock.patch(
+    #         'openedx.core.djangoapps.signals.signals.LEARNER_NOW_VERIFIED',
+    #         # 'lms.djangoapps.certificates.signals._listen_for_track_change',
+    #         return_value=None
+    #     ) as mock_signal:
+    #
+    #         print 'OKAY'
+    #         with waffle.waffle().override(waffle.INSTRUCTOR_PACED_ONLY, active=True):
+    #             with mock_get_score(1, 2):
+    #
+    #             # with mock_passing_grade():
+    #                 # Test negative
+    #                 LEARNER_NOW_VERIFIED.send(
+    #                     sender='',
+    #                     user=self.user
+    #                 )
+    #                 # mock_signal.assert_not_called()
+    #                 # #     student=self.user,
+    #                 # #     course_key=self.ip_course.id
+    #                 # # )
+    #                 # # Test positive, for all enrollments
+    #                 # verf_attempt = SoftwareSecurePhotoVerification(user=self.user, photo_id_key="dummy_photo_id_key")
+    #                 # # verf_attempt.mark_ready()
+    #                 # verf_attempt.status = 'approved'
+    #                 # verf_attempt.approve()
+    #                 # # verf_attempt.save()
+    #                 # print verf_attempt.status
+    #                 # # verf_attempt.save()
+    #                 mock_signal.assert_called_with(
+    #                     student=self.user
+    #                     # course_key=self.ip_course.id
+    #                 )
+    #             # print 'OKAY'
+    #             # mock_signal.assert_called(
+    #             #     student=self.user,
+    #             #     course_key=self.ip_course2.id
+    #             # )
+

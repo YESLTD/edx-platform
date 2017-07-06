@@ -78,7 +78,7 @@ def _listen_for_passing_grade(sender, user, course_id, **kwargs):  # pylint: dis
     Listen for a learner passing a course, send cert generation task,
     downstream signal from COURSE_GRADE_CHANGED
     """
-
+    print 'HELL YES'
     # No flags enabled
     if (
         not waffle.waffle().is_enabled(waffle.SELF_PACED_ONLY) and
@@ -88,14 +88,15 @@ def _listen_for_passing_grade(sender, user, course_id, **kwargs):  # pylint: dis
 
     # Only SELF_PACED_ONLY flag enabled
     if waffle.waffle().is_enabled(waffle.SELF_PACED_ONLY):
-        if not courses.get_course_by_id(course_key, depth=0).self_paced:
+        if not courses.get_course_by_id(course_id, depth=0).self_paced:
             return
 
     # Only INSTRUCTOR_PACED_ONLY flag enabled
-    elif waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY):
-        if courses.get_course_by_id(course_key, depth=0).self_paced:
+    if waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY):
+        if courses.get_course_by_id(course_id, depth=0).self_paced:
             return
-    if GeneratedCertificate.certificate_for_student(self.user, self.course_id) is None:
+
+    if GeneratedCertificate.certificate_for_student(user, course_id) is None:
         generate_certificate.apply_async(
             student=user,
             course_key=course_id,
@@ -112,6 +113,7 @@ def _listen_for_track_change(sender, user, **kwargs):  # pylint: disable=unused-
     Catches a track change signal, determines user status, fires "generate cert" task
 
     """
+    print 'HEREHERE'
     if (
         not waffle.waffle().is_enabled(waffle.SELF_PACED_ONLY) and
         not waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY)
@@ -126,5 +128,6 @@ def _listen_for_track_change(sender, user, **kwargs):  # pylint: disable=unused-
         waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY)
     ):
         user_enrollments = CourseEnrollment.enrollments_for_user(user=user)
+        grade_factory = CourseGradeFactory()
         for enrollment in user_enrollments:
-            CourseGradeFactory().read(user, course=enrollment.course.id)
+            print grade_factory.read(user=user, course=enrollment.course)
