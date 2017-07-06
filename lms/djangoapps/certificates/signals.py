@@ -84,7 +84,6 @@ def _listen_for_passing_grade(sender, user, course_id, **kwargs):  # pylint: dis
         not waffle.waffle().is_enabled(waffle.SELF_PACED_ONLY) and
         not waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY)
     ):
-        print 'FARTss'
         return
 
     # Only SELF_PACED_ONLY flag enabled
@@ -94,7 +93,6 @@ def _listen_for_passing_grade(sender, user, course_id, **kwargs):  # pylint: dis
 
     # Only INSTRUCTOR_PACED_ONLY flag enabled
     if waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY):
-        print 'FART'
         if courses.get_course_by_id(course_id, depth=0).self_paced:
             return
 
@@ -125,10 +123,6 @@ def _listen_for_track_change(sender, user, **kwargs):  # pylint: disable=unused-
     # This will read and update a user grade, if passed, will fire
     # 'COURSE_GRADE_NOW_PASSED' signal downstream, including downstream
     # waffle switch sorting for self paced/instructor paced.
-    # if (
-    #     waffle.waffle().is_enabled(waffle.SELF_PACED_ONLY) or
-    #     waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY)
-    # ):
     print 'HERE'
     user_enrollments = CourseEnrollment.enrollments_for_user(user=user)
     grade_factory = CourseGradeFactory()
