@@ -33,17 +33,18 @@ class CourseGradeFactory(object):
         or course_key should be provided.
         """
         course_data = CourseData(user, course, collected_block_structure, course_structure, course_key)
-        try:
-            course_grade, read_policy_hash = self._read(user, course_data)
-            if read_policy_hash == course_data.grading_policy_hash:
-                return course_grade
-            read_only = False  # update the persisted grade since the policy changed; TODO(TNL-6786) remove soon
-        except PersistentCourseGrade.DoesNotExist:
-            if assume_zero_if_absent(course_data.course_key):
-                return self._create_zero(user, course_data)
-            read_only = True  # keep the grade un-persisted; TODO(TNL-6786) remove once all grades are backfilled
-
-        return self._update(user, course_data, read_only)
+        return self._create_zero(user, course_data)
+        # try:
+        #     course_grade, read_policy_hash = self._read(user, course_data)
+        #     if read_policy_hash == course_data.grading_policy_hash:
+        #         return course_grade
+        #     read_only = False  # update the persisted grade since the policy changed; TODO(TNL-6786) remove soon
+        # except PersistentCourseGrade.DoesNotExist:
+        #     if assume_zero_if_absent(course_data.course_key):
+        #         return self._create_zero(user, course_data)
+        #     read_only = True  # keep the grade un-persisted; TODO(TNL-6786) remove once all grades are backfilled
+        #
+        # return self._update(user, course_data, read_only)
 
     def read(self, user, course=None, collected_block_structure=None, course_structure=None, course_key=None):
         """
@@ -111,13 +112,11 @@ class CourseGradeFactory(object):
         course_data = CourseData(
             user=None, course=course, collected_block_structure=collected_block_structure, course_key=course_key,
         )
-        for user in users:
-            yield self.GradeResult(user, self._create_zero(user, course_data), None)
-        # stats_tags = [u'action:{}'.format(course_data.course_key)]
-        # with self._course_transaction(course_data.course_key):
-        #     for user in users:
-        #         with dog_stats_api.timer('lms.grades.CourseGradeFactory.iter', tags=stats_tags):
-        #             yield self._iter_grade_result(user, course_data, force_update)
+        stats_tags = [u'action:{}'.format(course_data.course_key)]
+        with self._course_transaction(course_data.course_key):
+            for user in users:
+                with dog_stats_api.timer('lms.grades.CourseGradeFactory.iter', tags=stats_tags):
+                    yield self._iter_grade_result(user, course_data, force_update)
 
     def _iter_grade_result(self, user, course_data, force_update):
         try:
