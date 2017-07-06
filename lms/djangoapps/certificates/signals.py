@@ -84,6 +84,7 @@ def _listen_for_passing_grade(sender, user, course_id, **kwargs):  # pylint: dis
         not waffle.waffle().is_enabled(waffle.SELF_PACED_ONLY) and
         not waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY)
     ):
+        print 'FARTss'
         return
 
     # Only SELF_PACED_ONLY flag enabled
@@ -93,6 +94,7 @@ def _listen_for_passing_grade(sender, user, course_id, **kwargs):  # pylint: dis
 
     # Only INSTRUCTOR_PACED_ONLY flag enabled
     if waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY):
+        print 'FART'
         if courses.get_course_by_id(course_id, depth=0).self_paced:
             return
 
@@ -110,10 +112,10 @@ def _listen_for_passing_grade(sender, user, course_id, **kwargs):  # pylint: dis
 @receiver(LEARNER_NOW_VERIFIED, dispatch_uid="learner_track_changed")
 def _listen_for_track_change(sender, user, **kwargs):  # pylint: disable=unused-argument
     """
-    Catches a track change signal, determines user status, fires "generate cert" task
+    Catches a track change signal, determines user status,
+    fires downstream 'COURSE_GRADE_NOW_PASSED' task
 
     """
-    print 'HEREHERE'
     if (
         not waffle.waffle().is_enabled(waffle.SELF_PACED_ONLY) and
         not waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY)
@@ -123,11 +125,17 @@ def _listen_for_track_change(sender, user, **kwargs):  # pylint: disable=unused-
     # This will read and update a user grade, if passed, will fire
     # 'COURSE_GRADE_NOW_PASSED' signal downstream, including downstream
     # waffle switch sorting for self paced/instructor paced.
-    if (
-        waffle.waffle().is_enabled(waffle.SELF_PACED_ONLY) or
-        waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY)
-    ):
-        user_enrollments = CourseEnrollment.enrollments_for_user(user=user)
-        grade_factory = CourseGradeFactory()
-        for enrollment in user_enrollments:
-            print grade_factory.read(user=user, course=enrollment.course)
+    # if (
+    #     waffle.waffle().is_enabled(waffle.SELF_PACED_ONLY) or
+    #     waffle.waffle().is_enabled(waffle.INSTRUCTOR_PACED_ONLY)
+    # ):
+    print 'HERE'
+    user_enrollments = CourseEnrollment.enrollments_for_user(user=user)
+    grade_factory = CourseGradeFactory()
+    for enrollment in user_enrollments:
+        if grade_factory.read(user=user, course=enrollment.course).passed:
+            COURSE_GRADE_NOW_PASSED.send(
+                sender=_listen_for_track_change,
+                user=user,
+                course_id=enrollment.course.id,
+            )

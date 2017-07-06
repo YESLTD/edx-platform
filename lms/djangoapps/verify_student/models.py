@@ -518,7 +518,6 @@ class PhotoVerification(StatusModel):
         self.reviewing_service = service
         self.status = "approved"
         self.save()
-
         # Emit signal to find and generate eligible certificates
         LEARNER_NOW_VERIFIED.send_robust(
             sender=PhotoVerification,

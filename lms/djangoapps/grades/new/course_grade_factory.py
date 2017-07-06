@@ -159,6 +159,7 @@ class CourseGradeFactory(object):
             persistent_grade.letter_grade,
             persistent_grade.passed_timestamp is not None,
         )
+
         log.info(u'Grades: Read, %s, User: %s, %s', unicode(course_data), user.id, persistent_grade)
 
         return course_grade, persistent_grade.grading_policy_hash
